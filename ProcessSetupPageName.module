@@ -1,4 +1,4 @@
-<?php namespace ProcessWire;
+<?php
 
 /**
  * 
@@ -25,6 +25,7 @@
  * @since 2.1.3 2018-11-01 added support for array values and options fieldtype if dotsyntax is used (e.g. fieldname.title)
  * @since 2.1.4 2020-03-21 fixed bug: mentioned in forum https://processwire.com/talk/topic/8576-name-format-children/?do=findComment&comment=188014
  * @since 2.1.5 2024-03-27 fixed bug: attempt to read property "childNameFormat" on null due to page move actions
+ * @since 2.1.51 2026-01-12 fixed error in updatePageName method when saving page, now uses pages()->names->uniquePageName method
  * @todo disable _pw_page_name field under settings tab if updatePageName is enabled
  *
  */
@@ -34,14 +35,14 @@ class ProcessSetupPageName extends Process implements Module, ConfigurableModule
 	public static function getModuleInfo() {
 		return array(
 			'title' => __('Setup Page Name'), 
-			'version' => 215, 
+			'version' => 2151, 
 			'summary' => __("Overwrites function setupPageName() in class Pages (core), which is typically called in case of autogeneration of pages. Provides more options for 'Name Format Children' in parent template settings"),
 			'href' => 'https://processwire.com/talk/topic/8576-name-format-children/?p=108748',
 			'author' => 'kixe',
 			'singular' => true,
 			'autoload' => true,
-			'requires' => 'PHP>=5.4.0',
-			);
+			'requires' => 'PHP>=5.4.0, ProcessWire>=3.0',
+		);
 	}
 
 	/**
@@ -344,12 +345,12 @@ class ProcessSetupPageName extends Process implements Module, ConfigurableModule
 		}
 		$local = ($parentID && is_int($parentID))? " parent_id = $parentID AND":'';
 		$id = ($excludeID && is_int($excludeID))? " id != $excludeID AND":'';
-		$sql = "SELECT id,name$languageID FROM pages WHERE$local$id name$languageID REGEXP '^($pageName)(-([[:digit:]]+))?$'";
+		$sql = "SELECT id,name$languageID FROM pages WHERE$local$id name$languageID REGEXP '^($pageName)(-([[:digit:]]+))?$' COLLATE utf8_general_ci";
 		try {
 			$query = $this->wire('database')->prepare($sql);
 			$this->wire('database')->execute($query, true, 2);
-			$result = $query->fetchAll(\PDO::FETCH_KEY_PAIR);
-		} catch (\Exception $e) {
+			$result = $query->fetchAll(PDO::FETCH_KEY_PAIR);
+		} catch (Exception $e) {
 			$this->error($e);
 			return array();
 		}
@@ -436,7 +437,11 @@ class ProcessSetupPageName extends Process implements Module, ConfigurableModule
 		$pageLangName = $this->createFromFormat($page, $format, $languageID);
 		if (!$pageLangName) return false; // couldn't create a language specific name from format
 		$pageLangName = $this->sanitizePageName($pageLangName);
-		$pageLangName = $this->makeUnique($pageLangName, $page->id, $page->parent->id, $languageID);
+		// $pageLangName = $this->makeUnique($pageLangName, $page->id, $page->parent->id, $languageID); // problem, fixed:
+		$pageLangName = pages()->names->uniquePageName($pageLangName, $page->id, array(
+			'parent'=>$page->parent->id, 
+			'language'=>$languageID
+		));
 		return $pageLangName;
 	}
 
